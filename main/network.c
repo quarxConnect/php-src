@@ -74,6 +74,10 @@ int inet_aton(const char *, struct in_addr *);
 #include <sys/un.h>
 #endif
 
+#ifdef AF_PACKET
+#include <linux/if_packet.h>
+#endif
+
 #include "ext/standard/file.h"
 
 #ifdef PHP_WIN32
@@ -657,6 +661,18 @@ PHPAPI void php_network_populate_name_from_sockaddr(
 						*textaddr = zend_string_init((char*)ua->sun_path, len, 0);
 					}
 				}
+				break;
+#endif
+#ifdef AF_PACKET
+			case AF_PACKET:
+				{
+					struct sockaddr_ll *la = (struct sockaddr_ll*)sa;
+					
+					*textaddr = strpprintf (0, "%02x:%02x:%02x:%02x:%02x:%02x",
+						la->sll_addr [0], la->sll_addr [1], la->sll_addr [2], la->sll_addr [3],
+						la->sll_addr [4], la->sll_addr [5]);
+				}
+				
 				break;
 #endif
 

@@ -27,6 +27,13 @@
 #include <sys/un.h>
 #endif
 
+#ifdef AF_PACKET
+#include <linux/if.h>
+#include <linux/if_ether.h>
+#include <linux/if_packet.h>
+#include <sys/ioctl.h>
+#endif
+
 #ifndef MSG_DONTWAIT
 # define MSG_DONTWAIT 0
 #endif
@@ -48,6 +55,9 @@ const php_stream_ops php_stream_udp_socket_ops;
 #ifdef AF_UNIX
 const php_stream_ops php_stream_unix_socket_ops;
 const php_stream_ops php_stream_unixdg_socket_ops;
+#endif
+#ifdef AF_PACKET
+const php_stream_ops php_stream_packet_socket_ops;
 #endif
 
 
@@ -546,6 +556,17 @@ const php_stream_ops php_stream_unixdg_socket_ops = {
 };
 #endif
 
+#ifdef AF_PACKET
+const php_stream_ops php_stream_packet_socket_ops = {
+        php_sockop_write, php_sockop_read,
+        php_sockop_close, php_sockop_flush,
+        "packet_socket",
+        NULL, /* seek */
+        php_sockop_cast,
+        php_sockop_stat,
+        php_tcp_sockop_set_option,
+};
+#endif
 
 /* network socket operations */
 
@@ -648,6 +669,46 @@ static inline int php_tcp_sockop_bind(php_stream *stream, php_netstream_data_t *
 			(socklen_t) XtOffsetOf(struct sockaddr_un, sun_path) + xparam->inputs.namelen);
 	}
 #endif
+#ifdef AF_PACKET
+	if (stream->ops == &php_stream_packet_socket_ops) {
+		// SOCK_RAW:   Complete packets including link-layer header
+		// SOCK_DGRAM: Only packets
+		// ETH_P_ALL:  All protocols, IEEE 802.3 protocol number otherwise
+		sock->socket = socket (AF_PACKET, SOCK_RAW, htons (ETH_P_ALL));
+		
+		if (sock->socket == SOCK_ERR) {
+			if (xparam->want_errortext)
+				xparam->outputs.error_text = strpprintf (0, "Failed to create packet socket: %s", strerror (errno));
+			
+			return -1;
+		}
+		
+		if (!xparam->inputs.namelen)
+			return 0;
+		
+		// Request index of requested interface
+		struct ifreq ifr;
+		
+		memset ((void *)&ifr, 0, sizeof (ifr));
+		strncpy (ifr.ifr_name, xparam->inputs.name, xparam->inputs.namelen);
+		
+		if (ioctl (sock->socket, SIOCGIFINDEX, &ifr) < 0) {
+			 if (xparam->want_errortext)
+                                xparam->outputs.error_text = strpprintf (0, "Failed to find interface-index: %s", strerror (errno));
+			
+			return -1;
+		}
+		
+		// Bind to that interface
+		struct sockaddr_ll sa;
+		
+                sa.sll_family   = AF_PACKET;
+                sa.sll_protocol = htons (ETH_P_ALL);
+                sa.sll_ifindex  = ifr.ifr_ifindex;
+                
+                return bind (sock->socket, (const struct sockaddr *)&sa, sizeof (struct sockaddr_ll));
+	}
+#endif
 
 	host = parse_ip_address(xparam, &portno);
 
@@ -733,6 +794,10 @@ static inline int php_tcp_sockop_connect(php_stream *stream, php_netstream_data_
 
 		goto out;
 	}
+#endif
+#ifdef AF_PACKET
+	if (stream->ops == &php_stream_packet_socket_ops)
+		return php_tcp_sockop_bind (stream, sock, xparam);
 #endif
 
 	host = parse_ip_address(xparam, &portno);
@@ -906,6 +971,11 @@ PHPAPI php_stream *php_stream_generic_socket_factory(const char *proto, size_t p
 		ops = &php_stream_unix_socket_ops;
 	} else if (strncmp(proto, "udg", protolen) == 0) {
 		ops = &php_stream_unixdg_socket_ops;
+	}
+#endif
+#ifdef AF_PACKET
+	else if (strncmp (proto, "packet", protolen) == 0) {
+		ops = &php_stream_packet_socket_ops;
 	}
 #endif
 	else {

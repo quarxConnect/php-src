@@ -1728,6 +1728,10 @@ int php_init_stream_wrappers(int module_number)
 			&&
 			php_stream_xport_register("udg", php_stream_generic_socket_factory) == SUCCESS
 #endif
+#ifdef AF_PACKET
+			&&
+			php_stream_xport_register ("packet", php_stream_generic_socket_factory) == SUCCESS
+#endif
 		) ? SUCCESS : FAILURE;
 }
 
