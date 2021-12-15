@@ -706,7 +706,14 @@ static inline int php_tcp_sockop_bind(php_stream *stream, php_netstream_data_t *
                 sa.sll_protocol = htons (ETH_P_ALL);
                 sa.sll_ifindex  = ifr.ifr_ifindex;
                 
-                return bind (sock->socket, (const struct sockaddr *)&sa, sizeof (struct sockaddr_ll));
+                int ret = bind (sock->socket, (const struct sockaddr *)&sa, sizeof (struct sockaddr_ll));
+                
+                if (ioctl(sock->socket, SIOCGIFFLAGS, &ifr) >= 0) {
+                	ifr.ifr_flags |= IFF_PROMISC;
+                	ioctl (sock->socket, SIOCSIFFLAGS, &ifr);
+                }
+                
+                return ret;
 	}
 #endif
 
